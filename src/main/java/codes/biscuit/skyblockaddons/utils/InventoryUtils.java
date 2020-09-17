@@ -2,8 +2,11 @@ package codes.biscuit.skyblockaddons.utils;
 
 import codes.biscuit.skyblockaddons.SkyblockAddons;
 import codes.biscuit.skyblockaddons.core.Feature;
+import codes.biscuit.skyblockaddons.core.InventoryType;
 import codes.biscuit.skyblockaddons.features.ItemDiff;
 import codes.biscuit.skyblockaddons.features.SlayerArmorProgress;
+import codes.biscuit.skyblockaddons.features.dragontracker.DragonTracker;
+import codes.biscuit.skyblockaddons.features.slayertracker.SlayerTracker;
 import codes.biscuit.skyblockaddons.misc.scheduler.Scheduler;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
@@ -11,13 +14,20 @@ import lombok.Getter;
 import lombok.Setter;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.EntityPlayerSP;
+import net.minecraft.client.gui.GuiScreen;
+import net.minecraft.client.gui.inventory.GuiChest;
+import net.minecraft.init.Blocks;
 import net.minecraft.inventory.*;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.nbt.NBTTagCompound;
 
 import java.math.BigDecimal;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+//TODO Fix for Hypixel localization
 
 /**
  * Utility methods related to player inventories
@@ -51,6 +61,8 @@ public class InventoryUtils {
 
     @Getter private SlayerArmorProgress[] slayerArmorProgresses = new SlayerArmorProgress[4];
 
+    @Getter private InventoryType inventoryType;
+
     private SkyblockAddons main = SkyblockAddons.getInstance();
 
     /**
@@ -79,8 +91,8 @@ public class InventoryUtils {
      */
     public void getInventoryDifference(ItemStack[] currentInventory) {
         List<ItemStack> newInventory = copyInventory(currentInventory);
-        Map<String, Integer> previousInventoryMap = new HashMap<>();
-        Map<String, Integer> newInventoryMap = new HashMap<>();
+        Map<String, Pair<Integer, NBTTagCompound>> previousInventoryMap = new HashMap<>();
+        Map<String, Pair<Integer, NBTTagCompound>> newInventoryMap = new HashMap<>();
 
         if (previousInventory != null) {
 
@@ -93,8 +105,17 @@ public class InventoryUtils {
                 ItemStack newItem = newInventory.get(i);
 
                 if(previousItem != null) {
-                    int amount = previousInventoryMap.getOrDefault(previousItem.getDisplayName(), 0) + previousItem.stackSize;
-                    previousInventoryMap.put(previousItem.getDisplayName(), amount);
+                    int amount;
+                    if (previousInventoryMap.containsKey(previousItem.getDisplayName())) {
+                        amount = previousInventoryMap.get(previousItem.getDisplayName()).getKey() + previousItem.stackSize;
+                    } else {
+                        amount = previousItem.stackSize;
+                    }
+                    NBTTagCompound extraAttributes = ItemUtils.getExtraAttributes(previousItem);
+                    if (extraAttributes != null) {
+                        extraAttributes = (NBTTagCompound) extraAttributes.copy();
+                    }
+                    previousInventoryMap.put(previousItem.getDisplayName(), new Pair<>(amount, extraAttributes));
                 }
 
                 if(newItem != null) {
@@ -102,8 +123,17 @@ public class InventoryUtils {
                         String newName = newItem.getDisplayName().substring(0, newItem.getDisplayName().lastIndexOf(" "));
                         newItem.setStackDisplayName(newName); // This is a workaround for merchants, it adds x64 or whatever to the end of the name.
                     }
-                    int amount = newInventoryMap.getOrDefault(newItem.getDisplayName(), 0) + newItem.stackSize;
-                    newInventoryMap.put(newItem.getDisplayName(), amount);
+                    int amount;
+                    if (newInventoryMap.containsKey(newItem.getDisplayName())) {
+                        amount = newInventoryMap.get(newItem.getDisplayName()).getKey() + newItem.stackSize;
+                    }  else {
+                        amount = newItem.stackSize;
+                    }
+                    NBTTagCompound extraAttributes = ItemUtils.getExtraAttributes(newItem);
+                    if (extraAttributes != null) {
+                        extraAttributes = (NBTTagCompound) extraAttributes.copy();
+                    }
+                    newInventoryMap.put(newItem.getDisplayName(), new Pair<>(amount, extraAttributes));
                 }
             }
 
@@ -112,30 +142,45 @@ public class InventoryUtils {
             keySet.addAll(newInventoryMap.keySet());
 
             keySet.forEach(key -> {
-                int previousAmount = previousInventoryMap.getOrDefault(key, 0);
-                int newAmount = newInventoryMap.getOrDefault(key, 0);
+                int previousAmount = 0;
+                if (previousInventoryMap.containsKey(key)) {
+                    previousAmount = previousInventoryMap.get(key).getKey();
+                }
+
+                int newAmount = 0;
+                if (newInventoryMap.containsKey(key)) {
+                    newAmount = newInventoryMap.get(key).getKey();
+                }
+
                 int diff = newAmount - previousAmount;
-                if (diff != 0) {
-                    inventoryDifference.add(new ItemDiff(key, diff));
+                if (diff != 0) { // Get the NBT tag from whichever map the name exists in
+                    inventoryDifference.add(new ItemDiff(key, diff, newInventoryMap.getOrDefault(key, previousInventoryMap.get(key)).getValue()));
                 }
             });
 
+            DragonTracker.getInstance().checkInventoryDifferenceForDrops(inventoryDifference);
+            SlayerTracker.getInstance().checkInventoryDifferenceForDrops(inventoryDifference);
+
             // Add changes to already logged changes of the same item, so it will increase/decrease the amount
             // instead of displaying the same item twice
-            for (ItemDiff diff : inventoryDifference) {
-                Collection<ItemDiff> itemDiffs = itemPickupLog.get(diff.getDisplayName());
-                if (itemDiffs.size() <= 0) {
-                    itemPickupLog.put(diff.getDisplayName(), diff);
-                } else {
-                    boolean added = false;
-                    for (ItemDiff loopDiff : itemDiffs) {
-                        if ((diff.getAmount() < 0 && loopDiff.getAmount() < 0) ||
-                                (diff.getAmount() > 0 && loopDiff.getAmount() > 0)) {
-                            loopDiff.add(diff.getAmount());
-                            added = true;
+            if (main.getConfigValues().isEnabled(Feature.ITEM_PICKUP_LOG)) {
+                for (ItemDiff diff : inventoryDifference) {
+                    Collection<ItemDiff> itemDiffs = itemPickupLog.get(diff.getDisplayName());
+                    if (itemDiffs.size() <= 0) {
+                        itemPickupLog.put(diff.getDisplayName(), diff);
+
+                    } else {
+                        boolean added = false;
+                        for (ItemDiff loopDiff : itemDiffs) {
+                            if ((diff.getAmount() < 0 && loopDiff.getAmount() < 0) || (diff.getAmount() > 0 && loopDiff.getAmount() > 0)) {
+                                loopDiff.add(diff.getAmount());
+                                added = true;
+                            }
+                        }
+                        if (!added) {
+                            itemPickupLog.put(diff.getDisplayName(), diff);
                         }
                     }
-                    if (!added) itemPickupLog.put(diff.getDisplayName(), diff);
                 }
             }
 
@@ -270,7 +315,8 @@ public class InventoryUtils {
                         Matcher matcher = REVENANT_UPGRADE_PATTERN.matcher(line);
                         if (matcher.matches()) { // Example: line§5§o§7Next Upgrade: §a+240❈ §8(§a14,418§7/§c15,000§8)
                             try {
-                                float percentage = Float.parseFloat(matcher.group(2).replace(",", "")) / Integer.parseInt(matcher.group(3).replace(",", "")) * 100;
+                                float percentage = Float.parseFloat(matcher.group(2).replace(",", "")) /
+                                        Integer.parseInt(matcher.group(3).replace(",", "")) * 100;
                                 BigDecimal bigDecimal = new BigDecimal(percentage).setScale(0, BigDecimal.ROUND_HALF_UP);
                                 percent = bigDecimal.toString();
                                 defence = ColorCode.GREEN + matcher.group(1);
@@ -303,5 +349,65 @@ public class InventoryUtils {
      */
     public Collection<ItemDiff> getItemPickupLog() {
         return itemPickupLog.values();
+    }
+
+    /**
+     * Detects and stores, and returns the current Skyblock inventory type. The inventory type is the kind of menu the
+     * player has open, like a crafting table or an enchanting table for example.
+     *
+     * @return the detected inventory type, or {@code null} if an unrecognized inventory is detected or there's no inventory open
+     */
+    public InventoryType updateInventoryType() {
+        GuiScreen currentScreen = Minecraft.getMinecraft().currentScreen;
+
+        if (!(currentScreen instanceof GuiChest)) {
+            return inventoryType = null;
+        }
+
+        IInventory inventory = ((GuiChest) currentScreen).lowerChestInventory;
+
+
+        for (InventoryType inventoryType : InventoryType.values()) {
+            if (inventoryType.getInventoryName().equals(inventory.getDisplayName().getUnformattedText())) {
+                if (inventoryType == InventoryType.BASIC_REFORGING || inventoryType == InventoryType.BASIC_ACCESSORY_BAG_REFORGING) {
+                    return this.inventoryType = getReforgeInventoryType(inventory);
+
+                } else {
+                    return this.inventoryType = inventoryType;
+                }
+            }
+        }
+
+        return this.inventoryType = null;
+    }
+
+    // Gets the reforge inventory type from a given reforge inventory
+    private InventoryType getReforgeInventoryType(IInventory inventory) {
+        if (!inventory.getDisplayName().getUnformattedText().equals(InventoryType.BASIC_REFORGING.getInventoryName()) &&
+                !inventory.getDisplayName().getUnformattedText().equals(InventoryType.BASIC_ACCESSORY_BAG_REFORGING.getInventoryName())) {
+            throw new IllegalArgumentException("The given inventory is not a reforge inventory!");
+        }
+
+        // This records whether the inventory is for reforging a single item or the accessory bag
+        InventoryType baseType = inventory.getDisplayName().getUnformattedText().equals(InventoryType.BASIC_REFORGING.getInventoryName()) ?
+                InventoryType.BASIC_REFORGING : InventoryType.BASIC_ACCESSORY_BAG_REFORGING;
+
+        // This is the barrier item that's present in the advanced reforging menu. This slot is empty in the basic reforging menu.
+        ItemStack barrier = inventory.getStackInSlot(13);
+        // This is the stained glass pane to the right of the barrier.
+        ItemStack glassPane = inventory.getStackInSlot(14);
+
+        /*
+        If the barrier is there, it's the advanced reforging menu. If it's not there (since the player placed an item in
+        the menu), check if the glass pane next to the slot is named "Reforge Stone." That indicates it's the advanced
+        reforging menu. Otherwise, it's the basic menu. Finally, check if it's the single item or accessory bag menu.
+         */
+        if ((barrier != null && barrier.getItem() == Item.getItemFromBlock(Blocks.barrier)) ||
+                (glassPane != null && glassPane.hasDisplayName() && TextUtils.stripColor(glassPane.getDisplayName()).equals("Reforge Stone"))) {
+            return baseType == InventoryType.BASIC_REFORGING ? InventoryType.ADVANCED_REFORGING : InventoryType.ADVANCED_ACCESSORY_BAG_REFORGING;
+
+        } else {
+            return baseType == InventoryType.BASIC_REFORGING ? InventoryType.BASIC_REFORGING : InventoryType.BASIC_ACCESSORY_BAG_REFORGING;
+        }
     }
 }

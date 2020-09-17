@@ -1,6 +1,8 @@
 package codes.biscuit.skyblockaddons.utils;
 
 import codes.biscuit.skyblockaddons.SkyblockAddons;
+import lombok.Getter;
+import lombok.Setter;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.EntityOtherPlayerMP;
 import net.minecraft.client.entity.EntityPlayerSP;
@@ -13,6 +15,7 @@ import net.minecraft.scoreboard.Score;
 import net.minecraft.scoreboard.ScoreObjective;
 import net.minecraft.scoreboard.ScorePlayerTeam;
 import net.minecraft.scoreboard.Scoreboard;
+import net.minecraft.util.IChatComponent;
 import net.minecraft.util.StringUtils;
 import net.minecraftforge.common.util.Constants;
 
@@ -31,7 +34,7 @@ import java.util.stream.Collectors;
  * This is a class of utilities for SkyblockAddons developers.
  *
  * @author ILikePlayingGames
- * @version 2.2
+ * @version 2.3
  */
 public class DevUtils {
     /** Pattern used for removing the placeholder emoji player names from the Hypixel scoreboard */
@@ -41,6 +44,9 @@ public class DevUtils {
 
     public static final int ENTITY_COPY_RADIUS = 3;
     public static final int SIDEBAR_COPY_WIDTH = 30;
+
+    @Getter @Setter
+    private static boolean loggingActionBarMessages = false;
 
     static {
         ENTITY_NAMES.add("PlayerSP");
@@ -65,17 +71,13 @@ public class DevUtils {
      * @param stripControlCodes if {@code true}, the control codes will be removed, otherwise they will be copied
      */
     public static void copyScoreboardSidebar(Scoreboard scoreboard, boolean stripControlCodes) {
-        Utils utils = SkyblockAddons.getInstance().getUtils();
-
         if (scoreboard == null) {
-            utils.sendErrorMessage("No scoreboard found!");
-            return;
+            throw new NullPointerException("Scoreboard cannot be null!");
         }
 
         ScoreObjective sideBarObjective = scoreboard.getObjectiveInDisplaySlot(1);
         if (sideBarObjective == null) {
-            utils.sendErrorMessage("Nothing is being displayed in the sidebar!");
-            return;
+            throw new NullPointerException("Nothing is being displayed in the sidebar!");
         }
 
         StringBuilder sb = new StringBuilder();
@@ -176,6 +178,8 @@ public class DevUtils {
                 continue;
             }
 
+            entity.writeToNBT(entityData);
+
             // Add spacing before each new entry.
             if (stringBuilder.length() > 0) {
                 stringBuilder.append(System.lineSeparator()).append(System.lineSeparator());
@@ -187,7 +191,6 @@ public class DevUtils {
             }
 
             stringBuilder.append("NBT Data:").append(System.lineSeparator());
-            entity.writeToNBT(entityData);
             stringBuilder.append(prettyPrintNBT(entityData));
         }
 
@@ -246,7 +249,7 @@ public class DevUtils {
             copyEntityData(entityClasses, copyRadius);
         }
         else {
-            throw new IllegalArgumentException("Incorrect format! Use \"Class\" or \"Class,Class2,Class3\".");
+            throw new IllegalArgumentException("Incorrect format! Use \"Name\" or \"Name1,Name2,Name3\".");
         }
     }
 
@@ -276,6 +279,39 @@ public class DevUtils {
             return;
         }
         writeToClipboard(prettyPrintNBT(nbtTag), message);
+    }
+
+    /**
+     * Copies the header and footer of the tab player list to the clipboard
+     *
+     * @see net.minecraft.client.gui.GuiPlayerTabOverlay
+     */
+    public static void copyTabListHeaderAndFooter() {
+        Minecraft mc = Minecraft.getMinecraft();
+        IChatComponent tabHeader = mc.ingameGUI.getTabList().header;
+        IChatComponent tabFooter = mc.ingameGUI.getTabList().footer;
+        StringBuilder output = new StringBuilder("Header:").append("\n");
+
+        output.append(tabHeader.getFormattedText());
+
+        if (!tabHeader.getSiblings().isEmpty()) {
+            for (IChatComponent sibling : tabHeader.getSiblings()) {
+                output.append(sibling.getFormattedText());
+            }
+        }
+
+        output.append("\n\n");
+        output.append("Footer:").append("\n");
+
+        output.append(tabFooter.getFormattedText());
+
+        if (!tabFooter.getSiblings().isEmpty()) {
+            for (IChatComponent sibling : tabFooter.getSiblings()) {
+                output.append(sibling.getFormattedText());
+            }
+        }
+
+        copyStringToClipboard(output.toString(), "Tab list header and footer copied!");
     }
 
     /**

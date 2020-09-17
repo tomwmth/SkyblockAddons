@@ -2,6 +2,7 @@ package codes.biscuit.skyblockaddons.asm.hooks;
 
 import codes.biscuit.skyblockaddons.SkyblockAddons;
 import codes.biscuit.skyblockaddons.asm.utils.ReturnValue;
+import codes.biscuit.skyblockaddons.utils.ItemUtils;
 import codes.biscuit.skyblockaddons.features.backpacks.Backpack;
 import codes.biscuit.skyblockaddons.features.backpacks.BackpackManager;
 import codes.biscuit.skyblockaddons.features.cooldowns.CooldownManager;
@@ -9,11 +10,14 @@ import codes.biscuit.skyblockaddons.core.Feature;
 import codes.biscuit.skyblockaddons.utils.InventoryUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiScreen;
+import net.minecraft.init.Blocks;
 import net.minecraft.init.Items;
 import net.minecraft.inventory.Container;
 import net.minecraft.inventory.ContainerChest;
 import net.minecraft.inventory.IInventory;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.util.IChatComponent;
 import net.minecraftforge.event.entity.player.ItemTooltipEvent;
 import org.lwjgl.input.Keyboard;
@@ -50,7 +54,6 @@ public class GuiScreenHook {
 
                         /*
                         If the backpack is in the auction house window, ignore it.
-                        Empty backpacks can't be listed in the auction.
                          */
                         for (int i = 0; i < chestInventory.getSizeInventory(); i++) {
                             if (ItemStack.areItemStackTagsEqual(chestInventory.getStackInSlot(i), stack)) {
@@ -63,6 +66,14 @@ public class GuiScreenHook {
 
             Backpack backpack = BackpackManager.getFromItem(stack);
             if (backpack != null) {
+                /*
+                 Don't render the backpack preview if in the backpack is used to represent a crafting recipe or the
+                 result of one.
+                 */
+                if (BackpackManager.isBackpackCraftingMenuItem(stack)) {
+                    return;
+                }
+
                 backpack.setX(x);
                 backpack.setY(y);
                 if (isFreezeKeyDown() && System.currentTimeMillis() - lastBackpackFreezeKey > 500) {
