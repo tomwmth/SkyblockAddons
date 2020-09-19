@@ -11,10 +11,11 @@ import net.minecraft.item.ItemPickaxe;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
-import net.minecraft.util.ResourceLocation;
 import net.minecraftforge.common.util.Constants;
 import org.apache.commons.lang3.text.WordUtils;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -72,7 +73,7 @@ public class ItemUtils {
      * @param item the Skyblock item to check
      * @return the Skyblock Item ID of this item or {@code null} if this isn't a valid Skyblock item
      */
-    public static String getSkyBlockItemID(final ItemStack item) {
+    public static String getSkyBlockItemID(ItemStack item) {
         if (item == null) {
             throw new NullPointerException("Item cannot be null.");
         } else if (!item.hasTagCompound()) {
@@ -178,13 +179,13 @@ public class ItemUtils {
      * Checks if the given item is a material meant to be used in a crafting recipe. Dragon fragments are an example
      * since they are used to make dragon armor.
      *
-     * @param item the item to check
+     * @param itemStack the item to check
      * @return {@code true} if this item is a material, {@code false} otherwise
      */
-    public static boolean isMaterialForRecipe(ItemStack item) {
-        final List<String> tooltip = item.getTooltip(null, false);
-        for (String s : tooltip) {
-            if ("§5§o§eRight-click to view recipes!".equals(s)) {
+    public static boolean isMaterialForRecipe(ItemStack itemStack) {
+        List<String> lore = ItemUtils.getItemLore(itemStack);
+        for (String loreLine : lore) {
+            if ("Right-click to view recipes!".equals(TextUtils.stripColor(loreLine))) {
                 return true;
             }
         }
@@ -276,121 +277,82 @@ public class ItemUtils {
     }
 
     /**
-     * Returns a {@link ItemStack[]} of Items from the ExtraAttributes Skyblock data
+     * Returns the contents of a personal compactor using the data from an ItemStack
      *
-     * @param extraAttributes the Skyblock Data to check
-     * @return A {@link ItemStack[]} or {@code null} if it isn't a Personal Compactor
+     * @param compactor the ItemStack to check
+     * @return an {@link ItemStack[]} or {@code null} if it isn't a personal compactor
      */
-    public static ItemStack[] getPersonalCompactorContents(NBTTagCompound extraAttributes) {
+    public static ItemStack[] getPersonalCompactorContents(ItemStack compactor) {
+        String skyblockID = ItemUtils.getSkyBlockItemID(compactor);
+
+        if (skyblockID == null || !skyblockID.startsWith("PERSONAL_COMPACTOR")) {
+            return null;
+        }
+
+        NBTTagCompound extraAttributes = ItemUtils.getExtraAttributes(compactor);
+
         if (extraAttributes != null) {
-            String itemId = extraAttributes.getString("id");
+            ItemStack[] items = new ItemStack[9];
 
-            if (!itemId.startsWith("PERSONAL_COMPACTOR")) {
-                return null;
-            }
-
-            ItemStack[] items;
-            if (itemId.endsWith("4000"))
-                items = new ItemStack[1];
-            else if (itemId.endsWith("5000"))
-                items = new ItemStack[3];
-            else if (itemId.endsWith("6000"))
-                items = new ItemStack[7];
-            else
-                items = new ItemStack[0];
-
-            for (int i = 0; i < 7; i++) {
-                if (!extraAttributes.hasKey("personal_compact_" + i))
+            for (int i = 0; i < items.length; i++) {
+                if (!extraAttributes.hasKey("personal_compact_" + i)) {
                     continue;
+                }
+                String itemName = extraAttributes.getString("personal_compact_" + i);
 
-                String itemname = extraAttributes.getString("personal_compact_" + i);
-                itemname = itemname.replaceFirst("ENCHANTED_", "");
-                itemname = itemname.replaceFirst("RAW_", "");
-                itemname = itemname.toLowerCase();
-                if (itemname.contains("log")) {
-                    ItemStack is;
-                    switch (itemname) {
+                boolean enchanted = itemName.contains("ENCHANTED");
+
+                itemName = itemName.replaceFirst("ENCHANTED_", "")
+                        .replaceFirst("RAW_", "").toLowerCase();
+
+                ItemStack itemStack = null;
+                if (itemName.contains("log")) {
+                    switch (itemName) {
                         case "oak_log":
-                            is = new ItemStack(Blocks.log);
+                            itemStack = new ItemStack(Blocks.log);
                             break;
                         case "birch_log":
-                            is = new ItemStack(Blocks.log, 1, 2);
+                            itemStack = new ItemStack(Blocks.log, 1, 2);
                             break;
                         case "spruce_log":
-                            is = new ItemStack(Blocks.log, 1, 1);
+                            itemStack = new ItemStack(Blocks.log, 1, 1);
                             break;
                         case "jungle_log":
-                            is = new ItemStack(Blocks.log, 1, 3);
+                            itemStack = new ItemStack(Blocks.log, 1, 3);
                             break;
                         case "acacia_log":
-                            is = new ItemStack(Blocks.log2);
+                            itemStack = new ItemStack(Blocks.log2);
                             break;
                         case "dark_oak_log":
-                            is = new ItemStack(Blocks.log2, 1, 1);
+                            itemStack = new ItemStack(Blocks.log2, 1, 1);
                             break;
-                        default:
-                            continue;
                     }
+                }
 
-                    is.addEnchantment(Enchantment.protection, 1);
-                    items[i] = is;
-                    continue;
+                if (itemStack == null) {
+                    Item item = Item.getByNameOrId(itemName);
+                    if (item == null) {
+                        Block block = Block.getBlockFromName(itemName);
+                        if (block != null) {
+                            item = Item.getItemFromBlock(block);
+                        }
+                    }
+                    if (item != null) {
+                        itemStack = new ItemStack(item);
+                    }
                 }
-                Item it = null;
-                if (Item.itemRegistry.getObject(new ResourceLocation(itemname)) != null) {
-                    it = (Item.itemRegistry.getObject(new ResourceLocation(itemname)));
-                } else if (Block.blockRegistry.getObject(new ResourceLocation(itemname)) != null) {
-                    it = (Item.getItemFromBlock(Block.blockRegistry.getObject(new ResourceLocation(itemname))));
+
+                if (itemStack != null && enchanted) {
+                    itemStack.addEnchantment(Enchantment.protection, 1);
                 }
-                if (it != null) {
-                    ItemStack is = new ItemStack(it);
-                    is.addEnchantment(Enchantment.protection, 1);
-                    items[i] = is;
-                }
+
+                items[i] = itemStack;
             }
 
             return items;
         }
 
         return null;
-    }
-
-    /**
-     * Returns the winning bid of a Midas Sword from a given Skyblock Extra Attributes NBT Compound
-     * @param extraAttributes the NBT to check
-     * @return the winning bid or {@code -1} if it isn't a Midas Sword
-     */
-    public static int getMidasBid(NBTTagCompound extraAttributes) {
-        if (extraAttributes != null) {
-            String itemId = extraAttributes.getString("id");
-
-            if (!itemId.equals("MIDAS_SWORD")) {
-                return -1;
-            }
-
-            return extraAttributes.getInteger("winning_bid");
-        }
-
-        return -1;
-    }
-
-    /**
-     * Returns the number of anvil uses from a given Skyblock Extra Attributes NBT Compound
-     * WARNING: Cannot differentiate between an item that can or cannot have anvil uses
-     * @param extraAttributes the NBT to check
-     * @return the number of anvil uses or {@code -1} if it isn't a valid Skyblock NBT
-     */
-    public static int getAnvilUses(NBTTagCompound extraAttributes) {
-        if (extraAttributes != null) {
-
-            if (!extraAttributes.hasKey("anvil_uses")) {
-                return 0;
-            }
-
-            return extraAttributes.getInteger("anvil_uses");
-        }
-
-        return -1;
     }
 
     /**
@@ -410,5 +372,32 @@ public class ItemUtils {
         }
 
         return -1;
+    }
+
+    /**
+     * Returns a string list containing the nbt lore of an ItemStack, or
+     * an empty list if this item doesn't have a lore. The returned lore
+     * list is unmodifiable since it has been converted from an NBTTagList.
+     *
+     * @param itemStack the ItemStack to get the lore from
+     * @return the lore of an ItemStack as a string list
+     */
+    public static List<String> getItemLore(ItemStack itemStack) {
+        if (itemStack.hasTagCompound() && itemStack.getTagCompound().hasKey("display", 10)) { // 10 -> Compound
+            NBTTagCompound display = itemStack.getTagCompound().getCompoundTag("display");
+
+            if (display.hasKey("Lore", 9)) { // 9 -> List
+                NBTTagList lore = display.getTagList("Lore", 8); // 8 -> String
+
+                List<String> loreAsList = new ArrayList<>();
+                for (int lineNumber = 0; lineNumber < lore.tagCount(); lineNumber++) {
+                    loreAsList.add(lore.getStringTagAt(lineNumber));
+                }
+
+                return Collections.unmodifiableList(loreAsList);
+            }
+        }
+
+        return Collections.emptyList();
     }
 }
